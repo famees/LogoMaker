@@ -1,7 +1,8 @@
-// Famees Companion — a little desktop buddy in a shirt and jeans who
-// reminds Famees to drink water (every 30 min) and stretch (every 15 min).
+// Famees Companion — a desktop buddy in a denim jacket and jeans who pops up
+// in the middle of the screen to ask Famees about water (every 30 min) and
+// stretching (every 15 min).
 //
-// Build:  ./install.sh   (compiles, installs to ~/Applications, starts at login)
+// Build:  bash install.sh   (compiles, installs to ~/Applications, starts at login)
 
 import AppKit
 import SwiftUI
@@ -12,189 +13,141 @@ import AVFoundation
 let userName = "Famees"
 let waterInterval: TimeInterval = 30 * 60    // 30 minutes
 let stretchInterval: TimeInterval = 15 * 60  // 15 minutes
-let unansweredHideAfter: TimeInterval = 120  // auto-hide an unanswered question after 2 min
+let snoozeInterval: TimeInterval = 5 * 60    // "Remind me later" asks again after 5 minutes
+let unansweredHideAfter: TimeInterval = 120  // an unanswered question hides after 2 minutes
 
 // MARK: - Reminders
 
 struct Reminder: Equatable {
     let id: String
     let question: String
+    let spoken: String
     let yesReply: String
-    let noReply: String
+    let image: String
     let asksQuestion: Bool
 
     static let greeting = Reminder(
         id: "greeting",
-        question: "Hi \(userName)! 👋 I'm your buddy. I'll ask about water every 30 minutes and stretching every 15 minutes.",
-        yesReply: "", noReply: "", asksQuestion: false)
+        question: "Hi, \(userName)! 👋\nI'll check on you",
+        spoken: "Hi \(userName)! I'll remind you about water every 30 minutes, and stretching every 15 minutes.",
+        yesReply: "", image: "water", asksQuestion: false)
 
     static let water = Reminder(
         id: "water",
-        question: "Hey \(userName)! Have you had water? 💧\nDid you have water, \(userName)?",
-        yesReply: "Great job, \(userName)! Keep sipping. 😊",
-        noReply: "Go grab a glass of water right now, \(userName)! 🥤",
-        asksQuestion: true)
+        question: "Hey, \(userName)\nHave you had water?",
+        spoken: "Hey \(userName)! Have you had water? Did you have water?",
+        yesReply: "Great job, \(userName)!\nKeep sipping 💧",
+        image: "water", asksQuestion: true)
 
     static let stretch = Reminder(
         id: "stretch",
-        question: "\(userName), have you stretched your body or not? 🙆‍♂️",
-        yesReply: "Awesome, \(userName)! Your body says thank you. 💪",
-        noReply: "Stand up and stretch for a minute, \(userName) — arms up, roll your shoulders, twist your back!",
-        asksQuestion: true)
+        question: "Hey, \(userName)\nHave you stretched your body or not?",
+        spoken: "Hey \(userName)! Have you stretched your body or not?",
+        yesReply: "Awesome, \(userName)!\nYour body thanks you 💪",
+        image: "stretch", asksQuestion: true)
 }
 
 // MARK: - Shared state for the SwiftUI view
 
 final class CompanionModel: ObservableObject {
     @Published var text = ""
+    @Published var image = "water"
     @Published var showButtons = false
+    @Published var visible = false
     var onYes: () -> Void = {}
-    var onNo: () -> Void = {}
-    var onClose: () -> Void = {}
+    var onLater: () -> Void = {}
 }
 
-// MARK: - The character (shirt + jeans), drawn with shapes
-
-let skin = Color(red: 0.96, green: 0.80, blue: 0.68)
-let hair = Color(red: 0.20, green: 0.13, blue: 0.08)
-let shirt = Color(red: 0.84, green: 0.28, blue: 0.27)
-let shirtDark = Color(red: 0.66, green: 0.18, blue: 0.18)
-let denim = Color(red: 0.19, green: 0.33, blue: 0.60)
-let denimDark = Color(red: 0.13, green: 0.24, blue: 0.45)
-
-struct Smile: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addQuadCurve(to: CGPoint(x: r.maxX, y: r.minY), control: CGPoint(x: r.midX, y: r.maxY * 1.6))
-        return p
-    }
+func characterImage(_ name: String) -> NSImage? {
+    Bundle.main.url(forResource: name, withExtension: "png").flatMap { NSImage(contentsOf: $0) }
 }
 
-struct Collar: Shape {
-    func path(in r: CGRect) -> Path {
-        var p = Path()
-        p.move(to: CGPoint(x: r.minX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.maxX, y: r.minY))
-        p.addLine(to: CGPoint(x: r.midX, y: r.maxY))
-        p.closeSubpath()
-        return p
-    }
-}
+// MARK: - Views
 
-struct Arm: View {
+/// Big yellow text with a red outline and an orange glow.
+struct OutlinedText: View {
+    let text: String
+
     var body: some View {
-        VStack(spacing: -4) {
-            RoundedRectangle(cornerRadius: 9).fill(shirt).frame(width: 20, height: 62)
-            Circle().fill(skin).frame(width: 20, height: 20)
+        let base = Text(text)
+            .font(.system(size: 34, weight: .black, design: .rounded))
+            .multilineTextAlignment(.center)
+        ZStack {
+            ForEach(0..<16, id: \.self) { i in
+                let a = Double(i) / 16 * 2 * Double.pi
+                base.foregroundColor(Color(red: 0.85, green: 0.12, blue: 0.05))
+                    .offset(x: cos(a) * 3.5, y: sin(a) * 3.5)
+            }
+            base.foregroundStyle(LinearGradient(
+                colors: [Color(red: 1, green: 0.93, blue: 0.3), Color(red: 1, green: 0.74, blue: 0.08)],
+                startPoint: .top, endPoint: .bottom))
         }
-        .frame(width: 20, height: 78)
+        .shadow(color: Color.orange.opacity(0.8), radius: 10)
+        .shadow(color: .black.opacity(0.5), radius: 5, y: 3)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-struct Person: View {
-    @State private var wave = false
+struct PillButton: View {
+    let title: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+                .foregroundColor(Color(white: 0.2))
+                .padding(.horizontal, 22)
+                .padding(.vertical, 11)
+                .background(RoundedRectangle(cornerRadius: 12).fill(Color.white))
+                .shadow(color: .black.opacity(0.3), radius: 4, y: 2)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct CompanionView: View {
+    @ObservedObject var model: CompanionModel
     @State private var bob = false
 
     var body: some View {
-        ZStack {
-            // Legs (jeans) + shoes
-            RoundedRectangle(cornerRadius: 6).fill(denim).frame(width: 34, height: 86).offset(x: -19, y: 84)
-            RoundedRectangle(cornerRadius: 6).fill(denim).frame(width: 34, height: 86).offset(x: 19, y: 84)
-            Rectangle().fill(denimDark).frame(width: 2, height: 70).offset(x: 0, y: 76)
-            Capsule().fill(Color(white: 0.15)).frame(width: 42, height: 14).offset(x: -23, y: 128)
-            Capsule().fill(Color(white: 0.15)).frame(width: 42, height: 14).offset(x: 23, y: 128)
-
-            // Left arm, relaxed
-            Arm().rotationEffect(.degrees(8), anchor: .top).offset(x: -48, y: 3)
-            // Right arm, waving
-            Arm().rotationEffect(.degrees(wave ? -165 : -125), anchor: .top).offset(x: 48, y: 3)
-
-            // Shirt
-            RoundedRectangle(cornerRadius: 16).fill(shirt).frame(width: 84, height: 86).offset(y: 0)
-            Rectangle().fill(shirtDark).frame(width: 2, height: 74).offset(y: 4)
-            ForEach(0..<4) { i in
-                Circle().fill(Color.white.opacity(0.9)).frame(width: 5, height: 5)
-                    .offset(x: 5, y: CGFloat(-22 + i * 16))
+        VStack(spacing: 14) {
+            OutlinedText(text: model.text)
+                .frame(maxWidth: 520)
+            if model.showButtons {
+                HStack(spacing: 12) {
+                    PillButton(title: "YES") { model.onYes() }
+                    PillButton(title: "Remind me later") { model.onLater() }
+                }
             }
-            // Belt
-            Rectangle().fill(Color(red: 0.36, green: 0.22, blue: 0.12)).frame(width: 82, height: 7).offset(y: 42)
-            Rectangle().fill(Color(red: 0.85, green: 0.7, blue: 0.3)).frame(width: 10, height: 7).offset(y: 42)
-
-            // Neck + collar
-            Rectangle().fill(skin).frame(width: 18, height: 14).offset(y: -46)
-            Collar().fill(skin).frame(width: 24, height: 18).offset(y: -35)
-            Collar().stroke(Color.white, lineWidth: 3).frame(width: 30, height: 20).offset(y: -35)
-
-            // Head
-            Circle().fill(skin).frame(width: 66, height: 66).offset(y: -82)
-            Ellipse().fill(hair).frame(width: 70, height: 34).offset(y: -108)
-            Circle().fill(skin).frame(width: 10, height: 14).offset(x: -34, y: -80) // ears
-            Circle().fill(skin).frame(width: 10, height: 14).offset(x: 34, y: -80)
-            Circle().fill(Color.black).frame(width: 7, height: 7).offset(x: -12, y: -84)
-            Circle().fill(Color.black).frame(width: 7, height: 7).offset(x: 12, y: -84)
-            Circle().fill(Color.pink.opacity(0.35)).frame(width: 10, height: 6).offset(x: -20, y: -72)
-            Circle().fill(Color.pink.opacity(0.35)).frame(width: 10, height: 6).offset(x: 20, y: -72)
-            Smile().stroke(Color(red: 0.5, green: 0.2, blue: 0.15), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .frame(width: 22, height: 8).offset(y: -66)
+            Group {
+                if let img = characterImage(model.image) {
+                    Image(nsImage: img).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                } else {
+                    Text("🧍‍♂️").font(.system(size: 200))
+                }
+            }
+            .frame(height: 380)
+            .offset(y: bob ? -4 : 4)
         }
-        .frame(width: 170, height: 270)
-        .offset(y: bob ? -3 : 3)
+        .padding(20)
+        .frame(width: 560, height: 700, alignment: .bottom)
+        .scaleEffect(model.visible ? 1 : 0.5, anchor: .bottom)
+        .opacity(model.visible ? 1 : 0)
+        .animation(.spring(response: 0.45, dampingFraction: 0.65), value: model.visible)
         .onAppear {
-            withAnimation(.easeInOut(duration: 0.35).repeatForever(autoreverses: true)) { wave = true }
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) { bob = true }
         }
     }
 }
 
-// MARK: - Speech bubble + character
+// Lets the first click land on a button even though the app isn't active.
+final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
 
-struct CompanionView: View {
-    @ObservedObject var model: CompanionModel
-
-    var body: some View {
-        VStack(spacing: 0) {
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 12) {
-                    Text(model.text)
-                        .font(.system(size: 15, weight: .semibold, design: .rounded))
-                        .foregroundColor(.primary)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                    if model.showButtons {
-                        HStack(spacing: 10) {
-                            Button("Yes! ✅") { model.onYes() }
-                                .keyboardShortcut(.defaultAction)
-                            Button("Not yet") { model.onNo() }
-                        }
-                        .controlSize(.large)
-                    }
-                }
-                .padding(.horizontal, 18)
-                .padding(.vertical, 16)
-                .frame(width: 290)
-
-                Button(action: { model.onClose() }) {
-                    Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .padding(8)
-            }
-            .background(
-                RoundedRectangle(cornerRadius: 18)
-                    .fill(Color(NSColor.windowBackgroundColor))
-                    .shadow(color: .black.opacity(0.25), radius: 8, y: 3)
-            )
-            Collar()
-                .fill(Color(NSColor.windowBackgroundColor))
-                .frame(width: 22, height: 14)
-                .offset(x: 30)
-
-            Person()
-        }
-        .padding(12)
-        .frame(width: 320)
-    }
+final class CompanionPanel: NSPanel {
+    override var canBecomeKey: Bool { true }
 }
 
 // MARK: - App
@@ -222,25 +175,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         enqueue(.greeting)
     }
 
-    // Floating, transparent, always-on-top window in the bottom-right corner.
+    // Transparent, always-on-top window in the middle of the screen.
     func buildPanel() {
-        panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 320, height: 470),
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
+        panel = CompanionPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 700),
+                               styleMask: [.borderless, .nonactivatingPanel],
+                               backing: .buffered, defer: false)
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        panel.isMovableByWindowBackground = true
         panel.hidesOnDeactivate = false
+        panel.contentView = ClickThroughHostingView(rootView: CompanionView(model: model))
 
-        let host = NSHostingView(rootView: CompanionView(model: model))
-        panel.contentView = host
-
-        model.onYes = { [weak self] in self?.answer(yes: true) }
-        model.onNo = { [weak self] in self?.answer(yes: false) }
-        model.onClose = { [weak self] in self?.hide() }
+        model.onYes = { [weak self] in self?.answerYes() }
+        model.onLater = { [weak self] in self?.remindLater() }
     }
 
     func buildMenu() {
@@ -295,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // At the 30-minute mark both reminders fire together; they're shown one after another.
     func enqueue(_ r: Reminder) {
+        if paused && r.asksQuestion { return }
         if current == nil {
             show(r)
         } else if current != r && !queue.contains(r) {
@@ -305,26 +255,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func show(_ r: Reminder) {
         current = r
         model.text = r.question
+        model.image = r.image
         model.showButtons = r.asksQuestion
-        positionPanel()
-        panel.alphaValue = 0
+        model.visible = false
+        centerPanel()
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.4
-            panel.animator().alphaValue = 1
-        }
+        DispatchQueue.main.async { [weak self] in self?.model.visible = true }
         NSSound(named: "Pop")?.play()
-        say(r.question)
-        scheduleHide(after: r.asksQuestion ? unansweredHideAfter : 9)
+        say(r.spoken)
+        scheduleHide(after: r.asksQuestion ? unansweredHideAfter : 7)
     }
 
-    func answer(yes: Bool) {
+    func answerYes() {
         guard let r = current else { return }
-        let reply = yes ? r.yesReply : r.noReply
-        model.text = reply
+        model.text = r.yesReply
         model.showButtons = false
-        say(reply)
-        scheduleHide(after: 6)
+        say(r.yesReply)
+        scheduleHide(after: 3.5)
+    }
+
+    func remindLater() {
+        guard let r = current else { return }
+        model.text = "Okay! I'll ask again\nin 5 minutes ⏰"
+        model.showButtons = false
+        say("Okay, I'll ask again in 5 minutes.")
+        scheduleHide(after: 2.5)
+        DispatchQueue.main.asyncAfter(deadline: .now() + snoozeInterval) { [weak self] in self?.enqueue(r) }
     }
 
     func scheduleHide(after seconds: TimeInterval) {
@@ -336,11 +292,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func hide() {
         hideWork?.cancel()
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.3
-            panel.animator().alphaValue = 0
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+        model.visible = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
             guard let self = self else { return }
             self.panel.orderOut(nil)
             self.current = nil
@@ -351,15 +304,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    func positionPanel() {
+    func centerPanel() {
         guard let screen = NSScreen.main else { return }
         let vf = screen.visibleFrame
-        let size = panel.contentView?.fittingSize ?? NSSize(width: 320, height: 470)
-        panel.setContentSize(size)
-        panel.setFrameOrigin(NSPoint(x: vf.maxX - size.width - 16, y: vf.minY + 8))
+        let size = panel.frame.size
+        panel.setFrameOrigin(NSPoint(x: vf.midX - size.width / 2, y: vf.minY + max(0, (vf.height - size.height) / 2)))
     }
 
-    // Speak the text aloud (emoji stripped), preferring a male English voice.
+    // Speak the text aloud (emoji and line breaks stripped), preferring a male English voice.
     func say(_ text: String) {
         guard !muted else { return }
         let plain = String(String.UnicodeScalarView(text.unicodeScalars.filter { s in
