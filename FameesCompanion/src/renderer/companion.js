@@ -75,6 +75,7 @@ function render(msg) {
 }
 
 api.on('show', msg => {
+  character.resume();
   render(msg);
   stage.classList.remove('hidden');
   pop();
@@ -83,6 +84,7 @@ api.on('reply', msg => render(msg));
 api.on('hide', () => {
   stopRoutine();
   stage.classList.add('hidden');
+  setTimeout(() => { if (stage.classList.contains('hidden')) character.pause(); }, 500);
   if (interactive) { interactive = false; api.setInteractive(false); }
 });
 

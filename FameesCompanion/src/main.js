@@ -36,7 +36,6 @@ app.whenReady().then(() => {
   stats = new Stats(path.join(data, 'stats.json'));
   scheduler = new Scheduler(settings, Date.now());
 
-  createCompanionWindow();
   createTray();
   enableLoginOnFirstRun(data);
 
@@ -103,7 +102,10 @@ function refreshBusy() {
 
 // ---------------------------------------------------------------- companion window
 
+// The window only exists while he's on screen; between reminders it's closed so
+// it uses no memory or CPU.
 function createCompanionWindow() {
+  rendererReady = false;
   win = new BrowserWindow({
     width: 600, height: 760, show: false,
     transparent: true, frame: false, hasShadow: false, backgroundColor: '#00000000',
@@ -115,6 +117,7 @@ function createCompanionWindow() {
   win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
   win.setIgnoreMouseEvents(true, { forward: true });
   win.loadFile(path.join(__dirname, 'renderer', 'companion.html'));
+  win.on('closed', () => { win = null; rendererReady = false; pending = []; });
 }
 
 // Center on whichever screen the mouse is on.
@@ -129,12 +132,13 @@ function placeWindow() {
 }
 
 function send(channel, payload) {
-  if (!rendererReady) { pending.push([channel, payload]); return; }
+  if (!win || !rendererReady) { pending.push([channel, payload]); return; }
   win.webContents.send(channel, payload);
 }
 
 function show(channel, payload) {
   clearTimeout(hideTimer);
+  if (!win) createCompanionWindow();
   if (!visible) { placeWindow(); win.showInactive(); }
   visible = true;
   send(channel, payload);
@@ -146,8 +150,8 @@ function hideWindow() {
   visible = false;
   current = null;
   scheduler.lastHidden = Date.now();
-  win.setIgnoreMouseEvents(true, { forward: true });
-  setTimeout(() => { if (!visible) win.hide(); }, 450);
+  if (win) win.setIgnoreMouseEvents(true, { forward: true });
+  setTimeout(() => { if (!visible && win) win.destroy(); }, 450);
   updateTray();
 }
 
@@ -181,13 +185,14 @@ function startRoutine() {
 
 // ---------------------------------------------------------------- answers from the window
 
-ipcMain.on('ready', () => {
+ipcMain.on('ready', e => {
+  if (!win || e.sender !== win.webContents) return;
   rendererReady = true;
   for (const [c, p] of pending) win.webContents.send(c, p);
   pending = [];
 });
 
-ipcMain.on('interactive', (_e, on) => win.setIgnoreMouseEvents(!on, { forward: true }));
+ipcMain.on('interactive', (_e, on) => { if (win) win.setIgnoreMouseEvents(!on, { forward: true }); });
 
 ipcMain.on('action', (_e, id) => {
   if (!current) return;

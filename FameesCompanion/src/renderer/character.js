@@ -152,12 +152,16 @@
       el.eyes.setAttribute('transform', `translate(${s.eyes} 0)`);
       el.bottle.setAttribute('opacity', Math.max(0, Math.min(1, s.bottle)).toFixed(2));
       current = s;
-      requestAnimationFrame(frame);
+      if (running) requestAnimationFrame(frame);
     }
+    let running = true;
     let current = from;
     requestAnimationFrame(frame);
 
     return {
+      // Stop/start the animation loop (no CPU use while he's hidden).
+      pause() { running = false; },
+      resume() { if (!running) { running = true; requestAnimationFrame(frame); } },
       poses: Object.keys(POSES),
       get pose() { return poseName; },
       setPose(name, { instant = false } = {}) {
