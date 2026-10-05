@@ -36,7 +36,8 @@
         "LSUIElement": true
       },
       "identity": "-",
-      "artifactName": "Famees-Companion-Mac.${ext}"
+      "artifactName": "Famees-Companion-Mac.${ext}",
+      "hardenedRuntime": false
     },
     "win": {
       "icon": "assets/icon.png",
